@@ -1,0 +1,148 @@
+name: Setup
+
+description: Setup Node.js, cache and install dependencies
+
+inputs:
+  main-branch-name:
+    required: false
+    default: "main"
+  node-version:
+    required: false
+    default: "16"
+  npm-version:
+    required: false
+    default: "8"
+  yarn-version:
+    required: false
+    default: "1.22.x"
+  pnpm-version:
+    required: false
+    default: "7"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout [Pull Request]
+      uses: actions/checkout@v3
+      if: ${{ github.event_name == 'pull_request' }}
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+        fetch-depth: 0
+
+    - name: Checkout [Default Branch]
+      uses: actions/checkout@v3
+      if: ${{ github.event_name != 'pull_request' }}
+      with:
+        fetch-depth: 0
+
+    - name: Derive appropriate SHAs for base and head for `nx affected` commands
+      uses: nrwl/nx-set-shas@v3
+      with:
+        main-branch-name: ${{ inputs.main-branch-name }}
+
+    - name: Setup git user to "🤖 Github Bot"
+      run: git config user.email "-" && git config user.name "🤖 Github Bot"
+      shell: bash
+
+    - name: Detect package manager
+      id: package_manager
+      run: |
+        echo "name=$([[ -f ./yarn.lock ]] && echo "yarn" || ([[ -f ./pnpm-lock.yaml ]] && echo "pnpm") || echo "npm")" >> $GITHUB_OUTPUT
+      shell: bash
+
+    # Set node/npm/yarn versions using volta, with optional overrides provided by the consumer
+    - uses: volta-cli/action@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        npm-version: ${{ inputs.npm-version }}
+        yarn-version: ${{ inputs.yarn-version }}
+
+    # Install pnpm with exact version provided by the consumer of fallback to latest version
+    - name: Install PNPM
+      if: steps.package_manager.outputs.name == 'pnpm'
+      uses: pnpm/action-setup@v2
+      with:
+        version: ${{ inputs.pnpm-version || 'latest' }}
+
+    - name: Print node/npm/yarn versions
+      id: versions
+      run: |
+        node_ver=$( node --version )
+        yarn_ver=$( yarn --version || true )
+        pnpm_ver=$( pnpm --version || true )
+
+        echo "Node: ${node_ver:1}"
+        echo "NPM: $( npm --version )"
+        if [[ $yarn_ver != "" ]]; then echo "Yarn: $yarn_ver"; fi
+        if [[ $pnpm_ver != "" ]]; then echo "PNPM: $pnpm_ver"; fi
+
+        echo "node_version=${node_ver:1}" >> $GITHUB_OUTPUT
+        echo "yarn_version=${yarn_ver:1}" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Use the node_modules cache if available [npm]
+      if: steps.package_manager.outputs.name == 'npm'
+      uses: actions/cache@v3
+      with:
+        path: ~/.npm
+        key: ${{ runner.os }}-node-${{ steps.versions.outputs.node_version }}-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-${{ steps.versions.outputs.node_version }}-
+
+    - name: Use the node_modules cache if available [pnpm]
+      if: steps.package_manager.outputs.name == 'pnpm'
+      uses: actions/cache@v3
+      with:
+        path: ~/.pnpm-store
+        key: ${{ runner.os }}-node-${{ steps.versions.outputs.node_version }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+        restore-keys: |
+          ${{ runner.os }}-node-${{ steps.versions.outputs.node_version }}-
+
+    - name: Get yarn cache directory path [yarn 1.x]
+      if: steps.package_manager.outputs.name == 'yarn' && startsWith(steps.versions.outputs.yarn_version, '1.')
+      id: yarn-cache-dir-path
+      run: echo "dir=$(yarn cache dir)" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Use the node_modules cache if available [yarn 1.x]
+      if: steps.package_manager.outputs.name == 'yarn' && startsWith(steps.versions.outputs.yarn_version, '1.')
+      uses: actions/cache@v3
+      with:
+        path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
+        key: ${{ runner.os }}-node-${{ steps.versions.outputs.node_version }}-yarn-${{ hashFiles('**/yarn.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-node-${{ steps.versions.outputs.node_version }}-yarn-
+
+    - name: Get yarn cache directory path [yarn berry]
+      if: steps.package_manager.outputs.name == 'yarn' && !startsWith(steps.versions.outputs.yarn_version, '1.')
+      id: yarn-berry-cache-dir-path
+      run: echo "dir=$(yarn config get cacheFolder)" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Use the node_modules cache if available [yarn berry]
+      if: steps.package_manager.outputs.name == 'yarn' && !startsWith(steps.versions.outputs.yarn_version, '1.')
+      uses: actions/cache@v3
+      with:
+        path: ${{ steps.yarn-berry-cache-dir-path.outputs.dir }}
+        key: ${{ runner.os }}-node-${{ steps.versions.outputs.node_version }}-yarn-berry-${{ hashFiles('**/yarn.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-node-${{ steps.versions.outputs.node_version }}-yarn-berry-
+
+    - name: Install dependencies
+      run: |
+        if [[ "${{ steps.package_manager.outputs.name == 'yarn' }}" == "true" ]]; then
+          if [ "${{ startsWith(steps.versions.outputs.yarn_version, '1.') }}" == "true" ]; then
+            echo "Running yarn install --frozen-lockfile"
+            yarn install --frozen-lockfile
+          else
+            echo "Running yarn install --immutable"
+            yarn install --immutable
+          fi
+        elif [ "${{ steps.package_manager.outputs.name == 'pnpm' }}" == "true" ]; then
+          echo "Running pnpm install --frozen-lockfile"
+          pnpm install --frozen-lockfile
+        else
+          echo "Running npm ci"
+          npm ci
+        fi
+      shell: bash

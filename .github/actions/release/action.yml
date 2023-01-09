@@ -1,0 +1,35 @@
+name: Release
+
+description: Release packages
+
+inputs:
+  release-commands:
+    required: false
+    default: ""
+  github-token:
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Run release commands
+      if: ${{ inputs.release-commands != '' }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        ${{ inputs.release-commands }}
+      shell: bash
+
+    - name: Tag latest
+      run: |
+        git tag -f latest
+      shell: bash
+
+    - name: Push changes
+      uses: ad-m/github-push-action@master
+      with:
+        github_token: ${{ inputs.github-token }}
+        branch: ${{ github.ref }}
+        force: true
+        tags: true

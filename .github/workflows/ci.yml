@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches:
-      - master
+      - main
   pull_request:
 
 jobs:
@@ -21,6 +21,17 @@ jobs:
         pnpm exec nx affected --target=lint --parallel=3
         pnpm exec nx affected --target=test --parallel=3 --ci --code-coverage
         pnpm exec nx affected --target=build --parallel=3
+
+  release:
+    name: Release
+    needs: main
+    if: ${{ success() && (github.event_name != 'pull_request'|| github.event.action == 'closed' && github.event.pull_request.merged == true) && contains(github.event.commits[0].message, '[skip-ci]') == false }}
+    uses: ./.github/workflows/release.yml
+    with:
+      release-commands: |
+        pnpm exec nx run workspace:version
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
 
   agents:
     name: Nx Cloud - Agents
