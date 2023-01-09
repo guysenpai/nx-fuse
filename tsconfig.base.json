@@ -10,11 +10,13 @@
     "importHelpers": true,
     "target": "es2015",
     "module": "esnext",
-    "lib": ["es2017", "dom"],
+    "lib": ["es2022", "dom"],
     "skipLibCheck": true,
     "skipDefaultLibCheck": true,
     "baseUrl": ".",
-    "paths": {}
+    "paths": {
+      "@guysenpai/fuse-tailwind": ["packages/fuse-tailwind/src/index.ts"]
+    }
   },
   "exclude": ["node_modules", "tmp"]
 }
